@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktopctl"
+version = "0.1.0"
+description = "Desktop control backend for Wayland environments"
+requires-python = ">=3.13"
+
+[project.scripts]
+desktopctl = "desktopctl.cli:main"
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 89
+target-version = "py311"
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "PIE",
+    "RET",
+    "RUF",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = ["-s"]

@@ -119,6 +119,9 @@ class SavedWifiProfile:
     ssid: str
 
 
+# listings
+
+
 def wifi_is_enabled() -> bool:
     """Return whether WiFi is enabled.
 
@@ -127,22 +130,9 @@ def wifi_is_enabled() -> bool:
     `bool`
         `True` if WiFi is enabled; otherwise, `False`.
     """
-    logger.info("Call nmcli to query WiFi status.")
+    logger.debug("Call nmcli to query WiFi status.")
 
     return _run_nmcli("radio", "wifi") == "enabled"
-
-
-def enable_wifi(enable: bool) -> None:
-    """Enable or disable WiFi.
-
-    Parameters
-    ----------
-    `enable` : `bool`
-        Whether to enable (`True`) or disable (`False`) WiFi.
-    """
-    logger.info("Call nmcli to set WiFi status.")
-
-    _run_nmcli("radio", "wifi", "on" if enable else "off")
 
 
 def list_visible_wifi_networks() -> list[WifiNetwork]:
@@ -153,7 +143,7 @@ def list_visible_wifi_networks() -> list[WifiNetwork]:
     `list[WifiNetwork]`
         Visible WiFi networks reported by NetworkManager.
     """
-    logger.info("Call nmcli to list all visible WiFi networks.")
+    logger.debug("Call nmcli to list all visible WiFi networks.")
 
     output = _run_nmcli(
         "--terse",
@@ -180,44 +170,6 @@ def list_visible_wifi_networks() -> list[WifiNetwork]:
     return networks
 
 
-def scan_wifi_networks() -> None:
-    """Scan for visible WiFi networks."""
-    logger.info("Call nmcli to scan for visible WiFi networks.")
-
-    _run_nmcli("device", "wifi", "rescan")
-
-
-def connect_wifi_network(ssid: str, password: str | None = None) -> None:
-    """Connect to a WiFi network.
-
-    Parameters
-    ----------
-    `ssid` : `str`
-        SSID of the WiFi network.
-    `password` : `str` or `None`, optional
-        Password of the WiFi network, or `None` to use stored credentials.
-    """
-    logger.info("Call nmcli to connect to WiFi network %r.", ssid)
-
-    if password is None:
-        _run_nmcli("device", "wifi", "connect", ssid)
-        return
-
-    _run_nmcli("--ask", "device", "wifi", "connect", ssid, input_text=f"{password}\n")
-
-
-def disconnect_wifi_network() -> None:
-    """Disconnect the active WiFi network."""
-    logger.info("Call nmcli to disconnect the active WiFi network.")
-
-    device = _get_connected_wifi_device()
-
-    if device is None:
-        raise WifiError("No active WiFi connection was found.")
-
-    _run_nmcli("device", "disconnect", device)
-
-
 def list_saved_wifi_networks() -> list[SavedWifiProfile]:
     """List saved NetworkManager WiFi profiles.
 
@@ -226,7 +178,7 @@ def list_saved_wifi_networks() -> list[SavedWifiProfile]:
     `list[SavedWifiProfile]`
         Saved NetworkManager WiFi profiles.
     """
-    logger.info("Call nmcli to list saved WiFi profiles.")
+    logger.debug("Call nmcli to list saved WiFi profiles.")
 
     output = _run_nmcli(
         "--terse",
@@ -262,6 +214,60 @@ def list_saved_wifi_networks() -> list[SavedWifiProfile]:
     return profiles
 
 
+# control
+
+
+def enable_wifi(enable: bool) -> None:
+    """Enable or disable WiFi.
+
+    Parameters
+    ----------
+    `enable` : `bool`
+        Whether to enable (`True`) or disable (`False`) WiFi.
+    """
+    logger.debug("Call nmcli to set WiFi status.")
+
+    _run_nmcli("radio", "wifi", "on" if enable else "off")
+
+
+def scan_wifi_networks() -> None:
+    """Scan for visible WiFi networks."""
+    logger.debug("Call nmcli to scan for visible WiFi networks.")
+
+    _run_nmcli("device", "wifi", "rescan")
+
+
+def connect_wifi_network(ssid: str, password: str | None = None) -> None:
+    """Connect to a WiFi network.
+
+    Parameters
+    ----------
+    `ssid` : `str`
+        SSID of the WiFi network.
+    `password` : `str` or `None`, optional
+        Password of the WiFi network, or `None` to use stored credentials.
+    """
+    logger.debug("Call nmcli to connect to WiFi network %r.", ssid)
+
+    if password is None:
+        _run_nmcli("device", "wifi", "connect", ssid)
+        return
+
+    _run_nmcli("--ask", "device", "wifi", "connect", ssid, input_text=f"{password}\n")
+
+
+def disconnect_wifi_network() -> None:
+    """Disconnect the active WiFi network."""
+    logger.debug("Call nmcli to disconnect the active WiFi network.")
+
+    device = _get_connected_wifi_device()
+
+    if device is None:
+        raise WifiError("No active WiFi connection was found.")
+
+    _run_nmcli("device", "disconnect", device)
+
+
 def forget_wifi(uuid: str) -> None:
     """Delete a saved WiFi connection profile.
 
@@ -270,6 +276,6 @@ def forget_wifi(uuid: str) -> None:
     `uuid` : `str`
         Unique identifier of the NetworkManager connection profile.
     """
-    logger.info("Call nmcli to delete WiFi connection profile %r.", uuid)
+    logger.debug("Call nmcli to delete WiFi connection profile %r.", uuid)
 
     _run_nmcli("connection", "delete", "uuid", uuid)

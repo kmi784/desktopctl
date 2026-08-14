@@ -2,7 +2,7 @@ import argparse
 import logging
 import sys
 
-from desktopctl.wifi import WifiError, configure_wifi_parser
+from .wifi import WifiError, configure_wifi_parser
 
 logger = logging.getLogger(__name__)
 

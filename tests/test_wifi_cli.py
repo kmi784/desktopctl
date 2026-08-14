@@ -14,6 +14,7 @@ from desktopctl.wifi import nmcli_api, wifi_cli
 )
 def test_status(monkeypatch: pytest.MonkeyPatch, capsys, enabled, expected_output):
     monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: enabled)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: None)
 
     result = wifi_cli._status(argparse.Namespace(json=False))
 
@@ -21,19 +22,40 @@ def test_status(monkeypatch: pytest.MonkeyPatch, capsys, enabled, expected_outpu
     assert capsys.readouterr().out == expected_output
 
 
-@pytest.mark.parametrize(
-    "enabled",
-    [True, False],
-    ids=["enabled", "disabled"],
-)
-def test_status_json(monkeypatch: pytest.MonkeyPatch, capsys, enabled):
-    monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: enabled)
+def test_status_json_connected(monkeypatch: pytest.MonkeyPatch, capsys):
+    network = nmcli_api.WifiNetwork("WiFi", 67, "WPA2", True)
+    monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: True)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: network)
 
     result = wifi_cli._status(argparse.Namespace(json=True))
     output = json.loads(capsys.readouterr().out)
 
     assert result == 0
-    assert output == {"enabled": enabled}
+    assert output == {
+        "enabled": True,
+        "connected": True,
+        "ssid": "WiFi",
+        "signal": 67,
+        "security": "WPA2",
+    }
+
+
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+def test_status_json_disconnected(monkeypatch: pytest.MonkeyPatch, capsys, enabled):
+    monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: enabled)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: None)
+
+    result = wifi_cli._status(argparse.Namespace(json=True))
+    output = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert output == {
+        "enabled": enabled,
+        "connected": False,
+        "ssid": None,
+        "signal": None,
+        "security": None,
+    }
 
 
 def test_list_visible(monkeypatch: pytest.MonkeyPatch, capsys):

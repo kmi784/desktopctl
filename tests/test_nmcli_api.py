@@ -66,6 +66,24 @@ def test_list_visible_wifi_networks(monkeypatch: pytest.MonkeyPatch):
     assert not wifi3.connected
 
 
+def test_show_connected_wifi(monkeypatch: pytest.MonkeyPatch):
+    connected_network = nmcli_api.WifiNetwork("WiFi", 67, "WPA2", True)
+    networks = [
+        nmcli_api.WifiNetwork("Dummy WiFi", 34, "WPA2", False),
+        connected_network,
+    ]
+    monkeypatch.setattr(nmcli_api, "list_visible_wifi_networks", lambda: networks)
+
+    assert nmcli_api.show_connected_wifi() == connected_network
+
+
+def test_show_connected_wifi_returns_none(monkeypatch: pytest.MonkeyPatch):
+    networks = [nmcli_api.WifiNetwork("Dummy WiFi", 34, "WPA2", False)]
+    monkeypatch.setattr(nmcli_api, "list_visible_wifi_networks", lambda: networks)
+
+    assert nmcli_api.show_connected_wifi() is None
+
+
 def test_list_saved_wifi_networks(monkeypatch: pytest.MonkeyPatch):
 
     dummy_uuid = "123abc"

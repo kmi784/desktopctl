@@ -42,4 +42,4 @@ indent-style = "space"
 [tool.pytest]
 minversion = "9.0"
 testpaths = ["tests"]
-addopts = ["-s"]
+addopts = ["-s", "-v"]

@@ -11,6 +11,7 @@ from .nmcli_api import (
     list_saved_wifi_networks,
     list_visible_wifi_networks,
     scan_wifi_networks,
+    show_connected_wifi,
     wifi_is_enabled,
 )
 
@@ -50,9 +51,17 @@ def _print_table(data: list[dict]) -> None:
 def _status(arguments: argparse.Namespace) -> int:
     """Print the WiFi status in the requested format."""
     enabled = wifi_is_enabled()
+    network = show_connected_wifi() if enabled else None
 
     if arguments.json:
-        print(json.dumps({"enabled": enabled}))
+        data = {
+            "enabled": enabled,
+            "connected": network is not None,
+            "ssid": network.ssid if network else None,
+            "signal": network.signal if network else None,
+            "security": network.security if network else None,
+        }
+        print(json.dumps(data))
     else:
         print("enabled" if enabled else "disabled")
 

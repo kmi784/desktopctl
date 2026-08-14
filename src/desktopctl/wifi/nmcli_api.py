@@ -170,6 +170,22 @@ def list_visible_wifi_networks() -> list[WifiNetwork]:
     return networks
 
 
+def show_connected_wifi() -> WifiNetwork | None:
+    """Return the currently connected WiFi network.
+
+    Returns
+    -------
+    `WifiNetwork` or `None`
+        Connected WiFi network, or `None` if no network is connected.
+    """
+    logger.debug("Call nmcli to query the connected WiFi network.")
+
+    return next(
+        (network for network in list_visible_wifi_networks() if network.connected),
+        None,
+    )
+
+
 def list_saved_wifi_networks() -> list[SavedWifiProfile]:
     """List saved NetworkManager WiFi profiles.
 

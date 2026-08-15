@@ -66,6 +66,61 @@ def test_list_visible_wifi_networks(monkeypatch: pytest.MonkeyPatch):
     assert not wifi3.connected
 
 
+@pytest.mark.parametrize(
+    ("wifi1", "wifi2", "expected"),
+    [
+        (
+            "12:WPA2::Dummy\n",
+            "23:WPA2::Dummy\n",
+            nmcli_api.WifiNetwork("Dummy", 23, "WPA2", False),
+        ),
+        (
+            "12:WPA2:*:Dummy\n",
+            "23:WPA2::Dummy\n",
+            nmcli_api.WifiNetwork("Dummy", 12, "WPA2", True),
+        ),
+        (
+            "23:WPA2::Dummy\n",
+            "12:WPA2:*:Dummy\n",
+            nmcli_api.WifiNetwork("Dummy", 12, "WPA2", True),
+        ),
+    ],
+    ids=[
+        "prefer-greater-signal-strength",
+        "prefer-connected-wifi-before",
+        "prefer-connected-wifi-after",
+    ],
+)
+def test_list_visible_wifi_networks_duplicated_ssid(
+    monkeypatch: pytest.MonkeyPatch, wifi1, wifi2, expected
+):
+    def fake_run_nmcli(*args, input_text=None):
+        assert args == (
+            "--terse",
+            "--escape",
+            "no",
+            "--fields",
+            "SIGNAL,SECURITY,IN-USE,SSID",
+            "device",
+            "wifi",
+            "list",
+            "--rescan",
+            "no",
+        )
+
+        assert input_text is None
+
+        return wifi1 + wifi2
+
+    monkeypatch.setattr(nmcli_api, "_run_nmcli", fake_run_nmcli)
+
+    result = nmcli_api.list_visible_wifi_networks()
+
+    assert len(result) == 1
+    assert isinstance(result[0], nmcli_api.WifiNetwork)
+    assert result[0] == expected
+
+
 def test_show_connected_wifi(monkeypatch: pytest.MonkeyPatch):
     connected_network = nmcli_api.WifiNetwork("WiFi", 67, "WPA2", True)
     networks = [
@@ -280,8 +335,7 @@ def test_run_nmcli_raises_error_when_command_fails(
             "wlp0s20f3",
         ),
         (
-            "p2p-dev-wlp0s20f3:wifi-p2p:disconnected\n"
-            "enp0s31f6:ethernet:connected\n",
+            "p2p-dev-wlp0s20f3:wifi-p2p:disconnected\nenp0s31f6:ethernet:connected\n",
             None,
         ),
     ],

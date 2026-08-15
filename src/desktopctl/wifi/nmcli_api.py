@@ -158,16 +158,27 @@ def list_visible_wifi_networks() -> list[WifiNetwork]:
         "no",
     )
 
-    networks = []
+    networks = {}
     for line in output.splitlines():
         signal, security, in_use, ssid = line.split(":", maxsplit=3)
 
         if not ssid:
             continue
 
-        networks.append(WifiNetwork(ssid, int(signal), security, in_use == "*"))
+        current_network: WifiNetwork | None = networks.get(ssid)
+        candidate = WifiNetwork(ssid, int(signal), security, in_use == "*")
 
-    return networks
+        if current_network is None:
+            networks[ssid] = candidate
+            continue
+
+        if current_network.connected:
+            continue
+
+        if candidate.connected or current_network.signal < candidate.signal:
+            networks[ssid] = candidate
+
+    return list(networks.values())
 
 
 def show_connected_wifi() -> WifiNetwork | None:

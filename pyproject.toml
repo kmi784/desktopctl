@@ -21,7 +21,7 @@ dev = [
 [tool.ruff]
 line-length = 89
 target-version = "py313"
-select = [
+lint.select = [
     "E",
     "F",
     "I",

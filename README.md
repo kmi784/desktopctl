@@ -1,7 +1,8 @@
 # New Package
 
 ## Perquisites
-- NetworkManager command-line interface `nmcli`
+- NetworkManager command-line tool `nmcli`
+- Bluetooth command-line tool `bluetoothctl`
 
 ## Quick start
 

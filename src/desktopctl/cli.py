@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 
+from .bluetooth import BluetoothError, configure_bluetooth_parser
 from .wifi import WifiError, configure_wifi_parser
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,12 @@ def main() -> int:
     wifi_parser = commands.add_parser("wifi", help="Control WiFi functionality.")
     configure_wifi_parser(wifi_parser)
 
+    # Add Bluetooth commands
+    bluetooth_parser = commands.add_parser(
+        "bluetooth", help="Control Bluetooth functionality."
+    )
+    configure_bluetooth_parser(bluetooth_parser)
+
     # Parse arguments and dispatch the selected command.
     arguments = parser.parse_args()
 
@@ -37,5 +44,9 @@ def main() -> int:
         return arguments.handler(arguments)
     except WifiError as error:
         logger.debug("WiFi command failed.", exc_info=True)
+        print(f"desktopctl: {error}", file=sys.stderr)
+        return 1
+    except BluetoothError as error:
+        logger.debug("Bluetooth command failed.", exc_info=True)
         print(f"desktopctl: {error}", file=sys.stderr)
         return 1

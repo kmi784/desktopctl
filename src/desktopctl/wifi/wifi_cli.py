@@ -148,7 +148,7 @@ def _disconnect(_arguments: argparse.Namespace) -> int:
 
 
 def _forget(arguments: argparse.Namespace) -> int:
-    """Delete a saved WiFi profile."""
+    """Forget a saved WiFi network."""
     forget_wifi(arguments.uuid)
     return 0
 
@@ -164,50 +164,41 @@ def configure_wifi_parser(parser: argparse.ArgumentParser) -> None:
     `parser` : `argparse.ArgumentParser`
         WiFi parser of `desktopctl`
     """
-    wifi_commands = parser.add_subparsers(
-        dest="wifi_command",
-        required=True,
-    )
+    commands = parser.add_subparsers(dest="wifi_command", required=True)
 
     # Query WiFi status.
-    status_parser = wifi_commands.add_parser(
-        "status", help="Show the current WiFi status."
-    )
+    status_parser = commands.add_parser("status", help="Show the current WiFi status.")
     status_parser.add_argument(
         "--json", action="store_true", help="Output the WiFi status as JSON."
     )
     status_parser.set_defaults(handler=_status)
 
     # List visible WiFi networks.
-    visible_parser = wifi_commands.add_parser(
-        "visible", help="List visible WiFi networks."
-    )
+    visible_parser = commands.add_parser("visible", help="List visible WiFi networks.")
     visible_parser.add_argument(
         "--json", action="store_true", help="Output all visible WiFi networks as JSON."
     )
     visible_parser.set_defaults(handler=_list_visible)
 
     # List saved WiFi networks.
-    saved_parser = wifi_commands.add_parser("saved", help="List saved WiFi networks.")
+    saved_parser = commands.add_parser("saved", help="List saved WiFi networks.")
     saved_parser.add_argument(
         "--json", action="store_true", help="Output all saved WiFi networks as JSON."
     )
     saved_parser.set_defaults(handler=_list_saved)
 
     # Set WiFi status.
-    enable_parser = wifi_commands.add_parser("enable", help="Enable WiFi.")
+    enable_parser = commands.add_parser("enable", help="Enable WiFi.")
     enable_parser.set_defaults(handler=_enable)
-    disable_parser = wifi_commands.add_parser("disable", help="Disable WiFi.")
+    disable_parser = commands.add_parser("disable", help="Disable WiFi.")
     disable_parser.set_defaults(handler=_disable)
 
     # Scan for WiFi networks.
-    scan_parser = wifi_commands.add_parser("scan", help="Scan for WiFi networks.")
+    scan_parser = commands.add_parser("scan", help="Scan for WiFi networks.")
     scan_parser.set_defaults(handler=_scan)
 
     # Connect to a WiFi network.
-    connect_parser = wifi_commands.add_parser(
-        "connect", help="Connect to a WiFi network."
-    )
+    connect_parser = commands.add_parser("connect", help="Connect to a WiFi network.")
     connect_parser.add_argument("ssid", help="SSID of the WiFi network.")
     connect_parser.add_argument(
         "--password-stdin",
@@ -217,14 +208,12 @@ def configure_wifi_parser(parser: argparse.ArgumentParser) -> None:
     connect_parser.set_defaults(handler=_connect)
 
     # Disconnect the active WiFi network.
-    disconnect_parser = wifi_commands.add_parser(
+    disconnect_parser = commands.add_parser(
         "disconnect", help="Disconnect the active WiFi network."
     )
     disconnect_parser.set_defaults(handler=_disconnect)
 
-    # Delete a saved WiFi connection profile.
-    forget_parser = wifi_commands.add_parser(
-        "forget", help="Delete a saved WiFi connection profile."
-    )
+    # Forget a saved WiFi network.
+    forget_parser = commands.add_parser("forget", help="Forget a saved WiFi network.")
     forget_parser.add_argument("uuid", help="UUID of the saved WiFi connection profile.")
     forget_parser.set_defaults(handler=_forget)

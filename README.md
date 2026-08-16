@@ -10,7 +10,8 @@ A lightweight command-line tool for controlling common Linux desktop functionali
 
 - Python 3.13 or newer
 - NetworkManager command-line tool `nmcli`
-- Bluetooth command-line tool `bluetoothctl`
+- BlueZ
+- D-Bus  
 
 ## Installation
 

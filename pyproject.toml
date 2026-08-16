@@ -7,6 +7,10 @@ name = "desktopctl"
 version = "0.1.0"
 description = "Desktop control backend for Wayland environments"
 requires-python = ">=3.13"
+dependencies = [
+    "dbus-python>=1.4.0",
+]
+
 
 [project.scripts]
 desktopctl = "desktopctl.cli:main"

@@ -1,34 +1,69 @@
 import argparse
+import json
+
+from ..misc import print_table
+from .bluez_api import (
+    BluetoothDevice,
+    bluetooth_is_enabled,
+    enable_bluetooth,
+    list_connected_bluetooth_devices,
+    list_paired_bluetooth_devices,
+    list_visible_bluetooth_devices,
+    scan_bluetooth_devices,
+)
+
+
+def _device_to_dict(device: BluetoothDevice) -> dict[str, object]:
+    return {
+        "address": device.address,
+        "name": device.name,
+        "rssi": device.rssi,
+        "battery": device.battery,
+        "paired": device.paired,
+        "connected": device.connected,
+    }
+
 
 # listings
 
 
 def _status(arguments: argparse.Namespace) -> int:
     """Print the Bluetooth status in the requested format."""
+    enabled = bluetooth_is_enabled()
+
     if arguments.json:
-        print("Status as JSON")
+        data = {
+            "enabled": enabled,
+            "connected_devices": [
+                _device_to_dict(device) for device in list_connected_bluetooth_devices()
+            ],
+        }
+
+        print(json.dumps(data))
     else:
-        print("Status")
+        print("enabled" if enabled else "disabled")
 
     return 0
 
 
 def _list_visible(arguments: argparse.Namespace) -> int:
     """Print visible Bluetooth devices in the requested format."""
+    data = [_device_to_dict(device) for device in list_visible_bluetooth_devices()]
     if arguments.json:
-        print("List visible Bluetooth devices as JSON")
+        print(json.dumps(data))
     else:
-        print("List visible Bluetooth devices")
+        print_table(data)
 
     return 0
 
 
 def _list_paired(arguments: argparse.Namespace) -> int:
     """Print paired Bluetooth devices in the requested format."""
+    data = [_device_to_dict(device) for device in list_paired_bluetooth_devices()]
     if arguments.json:
-        print("List paired Bluetooth devices as JSON")
+        print(json.dumps(data))
     else:
-        print("List paired Bluetooth devices")
+        print_table(data)
 
     return 0
 
@@ -38,16 +73,19 @@ def _list_paired(arguments: argparse.Namespace) -> int:
 
 def _enable(_arguments: argparse.Namespace) -> int:
     """Enable Bluetooth."""
+    enable_bluetooth(True)
     return 0
 
 
 def _disable(_arguments: argparse.Namespace) -> int:
     """Disable Bluetooth."""
+    enable_bluetooth(False)
     return 0
 
 
 def _scan(_arguments: argparse.Namespace) -> int:
     """Request a Bluetooth scan."""
+    scan_bluetooth_devices()
     return 0
 
 

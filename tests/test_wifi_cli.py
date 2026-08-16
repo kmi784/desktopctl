@@ -1,6 +1,7 @@
 import argparse
 import json
 from io import StringIO
+from unittest.mock import Mock
 
 import pytest
 
@@ -134,6 +135,53 @@ def test_list_saved_json(monkeypatch: pytest.MonkeyPatch, capsys):
         {"ssid": "Dummy WiFi", "name": "Dummy", "uuid": "123abc"},
         {"ssid": "Work", "name": "Work profile", "uuid": "456def"},
     ]
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "enabled"),
+    [("_enable", True), ("_disable", False)],
+    ids=["enable", "disable"],
+)
+def test_set_wifi_state(
+    monkeypatch: pytest.MonkeyPatch,
+    handler_name,
+    enabled,
+):
+    enable_wifi = Mock()
+    monkeypatch.setattr(wifi_cli, "enable_wifi", enable_wifi)
+
+    handler = getattr(wifi_cli, handler_name)
+    assert handler(argparse.Namespace()) == 0
+    enable_wifi.assert_called_once_with(enabled)
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "function_name"),
+    [
+        ("_scan", "scan_wifi_networks"),
+        ("_disconnect", "disconnect_wifi_network"),
+    ],
+    ids=["scan", "disconnect"],
+)
+def test_wifi_action(
+    monkeypatch: pytest.MonkeyPatch,
+    handler_name,
+    function_name,
+):
+    action = Mock()
+    monkeypatch.setattr(wifi_cli, function_name, action)
+
+    handler = getattr(wifi_cli, handler_name)
+    assert handler(argparse.Namespace()) == 0
+    action.assert_called_once_with()
+
+
+def test_forget(monkeypatch: pytest.MonkeyPatch):
+    forget_wifi = Mock()
+    monkeypatch.setattr(wifi_cli, "forget_wifi", forget_wifi)
+
+    assert wifi_cli._forget(argparse.Namespace(uuid="123abc")) == 0
+    forget_wifi.assert_called_once_with("123abc")
 
 
 @pytest.mark.parametrize(

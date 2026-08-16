@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import dbus
 import pytest
 
+from desktopctl.bluetooth import _bluez as bluez_backend
 from desktopctl.bluetooth import bluez_api
 
 BLUEZ_ROOT_PATH = "/"
@@ -44,12 +45,34 @@ def _bluetooth_device(
     )
 
 
+def _use_hci0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the gateway to use the traditional default adapter."""
+    monkeypatch.setattr(
+        bluez_backend._BlueZGateway,
+        "_default_adapter_path",
+        lambda _gateway: bluez_api.ADAPTER_PATH,
+    )
+
+
+def _managed_bluetooth_device(
+    *,
+    adapter_path: str = bluez_api.ADAPTER_PATH,
+) -> bluez_backend._ManagedBluetoothDevice:
+    """Return a managed Bluetooth device for tests."""
+    return bluez_backend._ManagedBluetoothDevice(
+        path=BLUETOOTH_DEVICE_PATH,
+        adapter_path=adapter_path,
+        device=_bluetooth_device("AA:BB:CC:DD:EE:FF"),
+    )
+
+
 @pytest.mark.parametrize(
     "enabled",
     [True, False],
     ids=["enabled", "disabled"],
 )
 def test_bluetooth_is_enabled(monkeypatch, fake_system_bus, enabled):
+    _use_hci0(monkeypatch)
     properties = Mock()
     properties.Get.return_value = dbus.Boolean(enabled)
     interface = Mock(return_value=properties)
@@ -69,12 +92,51 @@ def test_bluetooth_is_enabled(monkeypatch, fake_system_bus, enabled):
 def test_bluetooth_is_enabled_raises_dbus_exception(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
+    _use_hci0(monkeypatch)
     properties = Mock()
     properties.Get.side_effect = dbus.exceptions.DBusException("BlueZ failed")
     monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=properties))
 
     with pytest.raises(bluez_api.BluetoothError, match="BlueZ failed"):
         bluez_api.bluetooth_is_enabled()
+
+
+def test_bluetooth_is_enabled_uses_available_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_system_bus,
+):
+    adapter_path = "/org/bluez/hci1"
+    bluez_proxy = object()
+    adapter_proxy = object()
+    fake_system_bus.proxies.update(
+        {
+            BLUEZ_ROOT_PATH: bluez_proxy,
+            adapter_path: adapter_proxy,
+        }
+    )
+    object_manager = Mock()
+    object_manager.GetManagedObjects.return_value = {
+        adapter_path: {bluez_api.BLUEZ_ADAPTER_INTERFACE: {}},
+    }
+    properties = Mock()
+    properties.Get.return_value = dbus.Boolean(True)
+
+    def fake_interface(proxy, interface_name):
+        if proxy is bluez_proxy:
+            assert interface_name == bluez_api.DBUS_OBJECT_MANAGER_INTERFACE
+            return object_manager
+
+        assert proxy is adapter_proxy
+        assert interface_name == dbus.PROPERTIES_IFACE
+        return properties
+
+    monkeypatch.setattr(bluez_api.dbus, "Interface", fake_interface)
+
+    assert bluez_api.bluetooth_is_enabled() is True
+    assert fake_system_bus.get_object_calls == [
+        (bluez_api.BLUEZ_SERVICE, BLUEZ_ROOT_PATH),
+        (bluez_api.BLUEZ_SERVICE, adapter_path),
+    ]
 
 
 def test_list_visible_bluetooth_devices(
@@ -204,6 +266,7 @@ def test_list_paired_bluetooth_devices(
     ids=["enable", "disable"],
 )
 def test_enable_bluetooth(monkeypatch: pytest.MonkeyPatch, fake_system_bus, enable):
+    _use_hci0(monkeypatch)
     properties = Mock()
     interface = Mock(return_value=properties)
     monkeypatch.setattr(bluez_api.dbus, "Interface", interface)
@@ -224,6 +287,7 @@ def test_enable_bluetooth(monkeypatch: pytest.MonkeyPatch, fake_system_bus, enab
 def test_enable_bluetooth_raises_dbus_exception(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
+    _use_hci0(monkeypatch)
     properties = Mock()
     properties.Set.side_effect = dbus.exceptions.DBusException("BlueZ failed")
     monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=properties))
@@ -233,11 +297,12 @@ def test_enable_bluetooth_raises_dbus_exception(
 
 
 def test_scan_bluetooth_devices(monkeypatch: pytest.MonkeyPatch, fake_system_bus):
+    _use_hci0(monkeypatch)
     adapter = Mock()
     interface = Mock(return_value=adapter)
     sleep = Mock()
     monkeypatch.setattr(bluez_api.dbus, "Interface", interface)
-    monkeypatch.setattr(bluez_api, "sleep", sleep)
+    monkeypatch.setattr(bluez_backend, "sleep", sleep)
 
     bluez_api.scan_bluetooth_devices(duration=3)
 
@@ -256,10 +321,11 @@ def test_scan_bluetooth_devices(monkeypatch: pytest.MonkeyPatch, fake_system_bus
 def test_scan_bluetooth_devices_stops_discovery_after_error(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
+    _use_hci0(monkeypatch)
     adapter = Mock()
     monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=adapter))
     monkeypatch.setattr(
-        bluez_api,
+        bluez_backend,
         "sleep",
         Mock(side_effect=RuntimeError("Scan interrupted")),
     )
@@ -273,6 +339,7 @@ def test_scan_bluetooth_devices_stops_discovery_after_error(
 def test_scan_bluetooth_devices_raises_dbus_exception(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
+    _use_hci0(monkeypatch)
     adapter = Mock()
     adapter.StartDiscovery.side_effect = dbus.exceptions.DBusException("BlueZ failed")
     monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=adapter))
@@ -310,6 +377,9 @@ def _configure_pairing(
         BLUETOOTH_DEVICE_PATH: {
             bluez_api.BLUEZ_DEVICE_INTERFACE: {
                 "Address": dbus.String("AA:BB:CC:DD:EE:FF"),
+                "Adapter": dbus.ObjectPath(bluez_api.ADAPTER_PATH),
+                "Paired": dbus.Boolean(initially_paired),
+                "Connected": dbus.Boolean(False),
             }
         }
     }
@@ -364,12 +434,12 @@ def _configure_pairing(
     monkeypatch.setattr(bluez_api.dbus, "Interface", fake_interface)
     dbus_main_loop = Mock()
     monkeypatch.setattr(
-        bluez_api,
+        bluez_backend,
         "DBusGMainLoop",
         Mock(return_value=dbus_main_loop),
     )
-    monkeypatch.setattr(bluez_api, "BlueZAgent", Mock(return_value=agent))
-    monkeypatch.setattr(bluez_api.GLib, "MainLoop", Mock(return_value=main_loop))
+    monkeypatch.setattr(bluez_backend, "BlueZAgent", Mock(return_value=agent))
+    monkeypatch.setattr(bluez_backend.GLib, "MainLoop", Mock(return_value=main_loop))
 
     return device, properties, agent_manager, agent, main_loop
 
@@ -382,16 +452,16 @@ def test_pair_bluetooth_device(monkeypatch, fake_system_bus):
 
     bluez_api.pair_bluetooth_device("aa:bb:cc:dd:ee:ff")
 
-    bluez_api.DBusGMainLoop.assert_called_once_with()
+    bluez_backend.DBusGMainLoop.assert_called_once_with()
     assert fake_system_bus.system_bus_calls == [
-        ((), {"private": True, "mainloop": bluez_api.DBusGMainLoop.return_value})
+        ((), {"private": True, "mainloop": bluez_backend.DBusGMainLoop.return_value})
     ]
     assert fake_system_bus.get_object_calls == [
         (bluez_api.BLUEZ_SERVICE, BLUEZ_ROOT_PATH),
         (bluez_api.BLUEZ_SERVICE, BLUETOOTH_DEVICE_PATH),
         (bluez_api.BLUEZ_SERVICE, bluez_api.BLUEZ_AGENT_MANAGER_PATH),
     ]
-    bluez_api.BlueZAgent.assert_called_once_with(
+    bluez_backend.BlueZAgent.assert_called_once_with(
         fake_system_bus,
         BLUETOOTH_DEVICE_PATH,
     )
@@ -434,7 +504,7 @@ def test_pair_bluetooth_device_trusts_existing_pairing(
     bluez_api.pair_bluetooth_device("AA:BB:CC:DD:EE:FF")
 
     device.Pair.assert_not_called()
-    bluez_api.BlueZAgent.assert_not_called()
+    bluez_backend.BlueZAgent.assert_not_called()
     agent_manager.RegisterAgent.assert_not_called()
     main_loop.run.assert_not_called()
     properties.Set.assert_called_once()
@@ -547,9 +617,9 @@ def test_control_bluetooth_device(
     target = Mock()
     interface = Mock(return_value=target)
     monkeypatch.setattr(
-        bluez_api,
-        "_get_bluetooth_device_path",
-        lambda _bus, _address: BLUETOOTH_DEVICE_PATH,
+        bluez_backend._BlueZGateway,
+        "_get_device",
+        lambda _gateway, _address: _managed_bluetooth_device(),
     )
     monkeypatch.setattr(bluez_api.dbus, "Interface", interface)
 
@@ -580,11 +650,59 @@ def test_control_bluetooth_device_raises_dbus_exception(
         "BlueZ failed"
     )
     monkeypatch.setattr(
-        bluez_api,
-        "_get_bluetooth_device_path",
-        lambda _bus, _address: BLUETOOTH_DEVICE_PATH,
+        bluez_backend._BlueZGateway,
+        "_get_device",
+        lambda _gateway, _address: _managed_bluetooth_device(),
     )
     monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=target))
 
     with pytest.raises(bluez_api.BluetoothError, match="BlueZ failed"):
         getattr(bluez_api, function_name)("AA:BB:CC:DD:EE:FF")
+
+
+def test_forget_bluetooth_device_uses_device_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_system_bus,
+):
+    adapter_path = "/org/bluez/hci1"
+    device_path = f"{adapter_path}/dev_AA_BB_CC_DD_EE_FF"
+    bluez_proxy = object()
+    adapter_proxy = object()
+    fake_system_bus.proxies.update(
+        {
+            BLUEZ_ROOT_PATH: bluez_proxy,
+            adapter_path: adapter_proxy,
+        }
+    )
+    object_manager = Mock()
+    object_manager.GetManagedObjects.return_value = {
+        adapter_path: {bluez_api.BLUEZ_ADAPTER_INTERFACE: {}},
+        device_path: {
+            bluez_api.BLUEZ_DEVICE_INTERFACE: {
+                "Address": dbus.String("AA:BB:CC:DD:EE:FF"),
+                "Adapter": dbus.ObjectPath(adapter_path),
+                "Paired": dbus.Boolean(True),
+                "Connected": dbus.Boolean(False),
+            }
+        },
+    }
+    adapter = Mock()
+
+    def fake_interface(proxy, interface_name):
+        if proxy is bluez_proxy:
+            assert interface_name == bluez_api.DBUS_OBJECT_MANAGER_INTERFACE
+            return object_manager
+
+        assert proxy is adapter_proxy
+        assert interface_name == bluez_api.BLUEZ_ADAPTER_INTERFACE
+        return adapter
+
+    monkeypatch.setattr(bluez_api.dbus, "Interface", fake_interface)
+
+    bluez_api.forget_bluetooth_device("AA:BB:CC:DD:EE:FF")
+
+    adapter.RemoveDevice.assert_called_once_with(device_path)
+    assert fake_system_bus.get_object_calls == [
+        (bluez_api.BLUEZ_SERVICE, BLUEZ_ROOT_PATH),
+        (bluez_api.BLUEZ_SERVICE, adapter_path),
+    ]

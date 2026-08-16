@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import dbus
 import pytest
 
+from desktopctl.wifi import _network_manager as nm_backend
 from desktopctl.wifi import nm_api
 
 WIFI_DEVICE_PATH = "/org/freedesktop/NetworkManager/Devices/1"
@@ -33,6 +34,30 @@ def _access_point(
         "WpaFlags": dbus.UInt32(wpa_flags),
         "RsnFlags": dbus.UInt32(rsn_flags),
     }
+
+
+def _access_point_model(
+    ssid: str,
+    signal: int,
+    *,
+    flags: int = 0,
+    wpa_flags: int = 0,
+    rsn_flags: int = 0,
+    path: str = ACCESS_POINT_PATH,
+    device_path: str = WIFI_DEVICE_PATH,
+    connected: bool = False,
+) -> nm_backend._WifiAccessPoint:
+    """Return normalized NetworkManager access-point data for tests."""
+    return nm_backend._WifiAccessPoint(
+        path=path,
+        device_path=device_path,
+        ssid=ssid,
+        signal=signal,
+        flags=flags,
+        wpa_flags=wpa_flags,
+        rsn_flags=rsn_flags,
+        connected=connected,
+    )
 
 
 def _configure_visible_wifi_dbus(
@@ -281,13 +306,48 @@ def test_list_visible_wifi_networks_duplicated_ssid(
     assert nm_api.list_visible_wifi_networks() == [expected]
 
 
+@pytest.mark.parametrize(
+    ("first_connected", "expected_path"),
+    [(False, "/access-point/strong"), (True, "/access-point/connected")],
+    ids=["prefer-strongest", "prefer-connected"],
+)
+def test_get_connection_target_uses_listing_priority(
+    monkeypatch: pytest.MonkeyPatch,
+    first_connected: bool,
+    expected_path: str,
+):
+    connected = _access_point_model(
+        "WiFi",
+        20,
+        path="/access-point/connected",
+        connected=first_connected,
+    )
+    strongest = _access_point_model(
+        "WiFi",
+        80,
+        path="/access-point/strong",
+    )
+    gateway = nm_backend._NetworkManagerGateway(Mock())
+    monkeypatch.setattr(
+        gateway,
+        "_get_access_points",
+        Mock(return_value=[connected, strongest]),
+    )
+
+    assert gateway._get_connection_target("WiFi").path == expected_path
+
+
 def test_list_visible_wifi_networks_raises_dbus_exception(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
-    def fail_to_get_wifi_devices(_bus):
+    def fail_to_get_wifi_devices(_gateway):
         raise dbus.exceptions.DBusException("NetworkManager failed")
 
-    monkeypatch.setattr(nm_api, "_get_wifi_device_paths", fail_to_get_wifi_devices)
+    monkeypatch.setattr(
+        nm_backend._NetworkManagerGateway,
+        "_get_wifi_device_paths",
+        fail_to_get_wifi_devices,
+    )
 
     with pytest.raises(nm_api.WifiError, match="NetworkManager failed"):
         nm_api.list_visible_wifi_networks()
@@ -295,18 +355,18 @@ def test_list_visible_wifi_networks_raises_dbus_exception(
 
 def test_show_connected_wifi(monkeypatch: pytest.MonkeyPatch):
     connected_network = nm_api.WifiNetwork("WiFi", 67, "password", True)
-    networks = [
-        nm_api.WifiNetwork("Dummy WiFi", 34, "password", False),
-        connected_network,
-    ]
-    monkeypatch.setattr(nm_api, "list_visible_wifi_networks", lambda: networks)
+    gateway = Mock()
+    gateway.show_connected_wifi_network.return_value = connected_network
+    monkeypatch.setattr(nm_api, "_gateway", Mock(return_value=gateway))
 
     assert nm_api.show_connected_wifi_network() == connected_network
+    gateway.show_connected_wifi_network.assert_called_once_with()
 
 
 def test_show_connected_wifi_returns_none(monkeypatch: pytest.MonkeyPatch):
-    networks = [nm_api.WifiNetwork("Dummy WiFi", 34, "password", False)]
-    monkeypatch.setattr(nm_api, "list_visible_wifi_networks", lambda: networks)
+    gateway = Mock()
+    gateway.show_connected_wifi_network.return_value = None
+    monkeypatch.setattr(nm_api, "_gateway", Mock(return_value=gateway))
 
     assert nm_api.show_connected_wifi_network() is None
 
@@ -437,7 +497,9 @@ def _configure_wifi_scan_dbus(monkeypatch, fake_system_bus):
         return wireless
 
     monkeypatch.setattr(
-        nm_api, "_get_wifi_device_paths", lambda _bus: [WIFI_DEVICE_PATH]
+        nm_backend._NetworkManagerGateway,
+        "_get_wifi_device_paths",
+        lambda _gateway: [WIFI_DEVICE_PATH],
     )
     monkeypatch.setattr(nm_api.dbus, "Interface", fake_interface)
 
@@ -448,8 +510,8 @@ def test_scan_wifi_networks(monkeypatch: pytest.MonkeyPatch, fake_system_bus):
     properties, wireless = _configure_wifi_scan_dbus(monkeypatch, fake_system_bus)
     properties.Get.side_effect = [100, 100, 101]
     sleep = Mock()
-    monkeypatch.setattr(nm_api, "monotonic", Mock(return_value=0.0))
-    monkeypatch.setattr(nm_api, "sleep", sleep)
+    monkeypatch.setattr(nm_backend, "monotonic", Mock(return_value=0.0))
+    monkeypatch.setattr(nm_backend, "sleep", sleep)
 
     nm_api.scan_wifi_networks()
 
@@ -470,7 +532,11 @@ def test_scan_wifi_networks(monkeypatch: pytest.MonkeyPatch, fake_system_bus):
 def test_scan_wifi_networks_without_device(
     monkeypatch: pytest.MonkeyPatch, fake_system_bus
 ):
-    monkeypatch.setattr(nm_api, "_get_wifi_device_paths", lambda _bus: [])
+    monkeypatch.setattr(
+        nm_backend._NetworkManagerGateway,
+        "_get_wifi_device_paths",
+        lambda _gateway: [],
+    )
 
     nm_api.scan_wifi_networks()
 
@@ -496,8 +562,8 @@ def test_scan_wifi_networks_raises_timeout(
     properties, _wireless = _configure_wifi_scan_dbus(monkeypatch, fake_system_bus)
     properties.Get.return_value = 100
     sleep = Mock()
-    monkeypatch.setattr(nm_api, "monotonic", Mock(side_effect=[0.0, 10.0]))
-    monkeypatch.setattr(nm_api, "sleep", sleep)
+    monkeypatch.setattr(nm_backend, "monotonic", Mock(side_effect=[0.0, 10.0]))
+    monkeypatch.setattr(nm_backend, "sleep", sleep)
 
     with pytest.raises(nm_api.WifiError, match="WiFi scan timed out"):
         nm_api.scan_wifi_networks()
@@ -512,25 +578,22 @@ def wifi_connect_dbus(monkeypatch, fake_system_bus):
     settings = Mock()
     wait_for_connection = Mock()
     profiles = []
+    access_point = _access_point_model("WiFi", 50)
 
     monkeypatch.setattr(
-        nm_api, "_get_wifi_device_paths", lambda _bus: [WIFI_DEVICE_PATH]
+        nm_backend._NetworkManagerGateway,
+        "_get_connection_target",
+        lambda _gateway, _ssid: access_point,
     )
     monkeypatch.setattr(
-        nm_api,
-        "_get_wifi_access_point_path",
-        lambda _bus, _device_path, _ssid: ACCESS_POINT_PATH,
-    )
-    monkeypatch.setattr(nm_api, "_wait_for_wifi_connection", wait_for_connection)
-    monkeypatch.setattr(
-        nm_api,
-        "list_saved_wifi_networks",
-        lambda: profiles,
+        nm_backend._NetworkManagerGateway,
+        "_get_saved_profiles",
+        lambda _gateway: profiles,
     )
     monkeypatch.setattr(
-        nm_api,
-        "_get_access_point_properties",
-        lambda _bus, _path: _access_point("WiFi", 50),
+        nm_backend._NetworkManagerGateway,
+        "_wait_for_wifi_connection",
+        lambda _gateway, path: wait_for_connection(path),
     )
 
     def fake_interface(_proxy, interface_name):
@@ -566,10 +629,8 @@ def test_connect_saved_wifi_network(fake_system_bus, wifi_connect_dbus):
         WIFI_DEVICE_PATH,
         ACCESS_POINT_PATH,
     )
-    wait_for_connection.assert_called_once_with(
-        fake_system_bus,
-        ACTIVE_CONNECTION_PATH,
-    )
+    wait_for_connection.assert_called_once_with(ACTIVE_CONNECTION_PATH)
+    assert len(fake_system_bus.system_bus_calls) == 1
 
 
 def test_connect_new_wifi_network(
@@ -580,7 +641,11 @@ def test_connect_new_wifi_network(
     network_manager, _settings, wait_for_connection, _profiles = wifi_connect_dbus
     connection_settings = dbus.Dictionary({}, signature="sa{sv}")
     build_settings = Mock(return_value=connection_settings)
-    monkeypatch.setattr(nm_api, "_build_wifi_connection_settings", build_settings)
+    monkeypatch.setattr(
+        nm_backend,
+        "_build_wifi_connection_settings",
+        build_settings,
+    )
 
     nm_api.connect_wifi_network("WiFi", "password123")
 
@@ -591,7 +656,8 @@ def test_connect_new_wifi_network(
     assert connection is connection_settings
     assert (device, access_point) == (WIFI_DEVICE_PATH, ACCESS_POINT_PATH)
     assert str(options["persist"]) == "disk"
-    wait_for_connection.assert_called_once_with(fake_system_bus, ACTIVE_CONNECTION_PATH)
+    wait_for_connection.assert_called_once_with(ACTIVE_CONNECTION_PATH)
+    assert len(fake_system_bus.system_bus_calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -605,10 +671,10 @@ def test_connect_new_wifi_network(
     ids=["open", "wpa2", "wpa3", "owe"],
 )
 def test_build_wifi_connection_settings(rsn_flags, password, key_management):
-    settings = nm_api._build_wifi_connection_settings(
+    settings = nm_backend._build_wifi_connection_settings(
         "WiFi",
         password,
-        _access_point("WiFi", 50, rsn_flags=rsn_flags),
+        _access_point_model("WiFi", 50, rsn_flags=rsn_flags),
     )
 
     assert settings.signature == "sa{sv}"
@@ -649,7 +715,17 @@ def test_connect_new_wifi_network_rejects_unsupported_input(
     message,
 ):
     with pytest.raises(nm_api.WifiError, match=message):
-        nm_api._build_wifi_connection_settings("WiFi", password, properties)
+        nm_backend._build_wifi_connection_settings(
+            "WiFi",
+            password,
+            _access_point_model(
+                "WiFi",
+                50,
+                flags=int(properties["Flags"]),
+                wpa_flags=int(properties["WpaFlags"]),
+                rsn_flags=int(properties["RsnFlags"]),
+            ),
+        )
 
 
 def test_connect_saved_wifi_network_rejects_password(wifi_connect_dbus):
@@ -663,7 +739,14 @@ def test_connect_saved_wifi_network_rejects_password(wifi_connect_dbus):
 def test_connect_wifi_network_raises_error_when_not_visible(
     monkeypatch, wifi_connect_dbus
 ):
-    monkeypatch.setattr(nm_api, "_get_wifi_device_paths", lambda _bus: [])
+    def fail_to_find_target(_gateway, ssid):
+        raise nm_api.WifiError(f"WiFi network {ssid!r} was not found.")
+
+    monkeypatch.setattr(
+        nm_backend._NetworkManagerGateway,
+        "_get_connection_target",
+        fail_to_find_target,
+    )
 
     with pytest.raises(nm_api.WifiError, match="was not found"):
         nm_api.connect_wifi_network("WiFi")
@@ -684,10 +767,12 @@ def test_wait_for_wifi_connection(monkeypatch, fake_system_bus):
     properties.Get.side_effect = [1, nm_api.NM_ACTIVE_CONNECTION_STATE_ACTIVATED]
     sleep = Mock()
     monkeypatch.setattr(nm_api.dbus, "Interface", Mock(return_value=properties))
-    monkeypatch.setattr(nm_api, "monotonic", Mock(return_value=0.0))
-    monkeypatch.setattr(nm_api, "sleep", sleep)
+    monkeypatch.setattr(nm_backend, "monotonic", Mock(return_value=0.0))
+    monkeypatch.setattr(nm_backend, "sleep", sleep)
 
-    nm_api._wait_for_wifi_connection(fake_system_bus, ACTIVE_CONNECTION_PATH)
+    nm_backend._NetworkManagerGateway(fake_system_bus)._wait_for_wifi_connection(
+        ACTIVE_CONNECTION_PATH
+    )
 
     sleep.assert_called_once_with(0.2)
     properties.Get.assert_called_with(
@@ -713,12 +798,14 @@ def test_wait_for_wifi_connection_raises_error(
     properties = Mock()
     properties.Get.return_value = state
     monkeypatch.setattr(nm_api.dbus, "Interface", Mock(return_value=properties))
-    monkeypatch.setattr(nm_api, "monotonic", Mock(side_effect=[0.0, 30.0]))
+    monkeypatch.setattr(nm_backend, "monotonic", Mock(side_effect=[0.0, 30.0]))
     sleep = Mock()
-    monkeypatch.setattr(nm_api, "sleep", sleep)
+    monkeypatch.setattr(nm_backend, "sleep", sleep)
 
     with pytest.raises(nm_api.WifiError, match=message):
-        nm_api._wait_for_wifi_connection(fake_system_bus, ACTIVE_CONNECTION_PATH)
+        nm_backend._NetworkManagerGateway(fake_system_bus)._wait_for_wifi_connection(
+            ACTIVE_CONNECTION_PATH
+        )
 
     sleep.assert_not_called()
 
@@ -728,9 +815,9 @@ def test_disconnect_wifi_network(monkeypatch, fake_system_bus):
     properties.Get.return_value = dbus.ObjectPath(ACTIVE_CONNECTION_PATH)
     device = Mock()
     monkeypatch.setattr(
-        nm_api,
+        nm_backend._NetworkManagerGateway,
         "_get_wifi_device_paths",
-        lambda _bus: [WIFI_DEVICE_PATH],
+        lambda _gateway: [WIFI_DEVICE_PATH],
     )
 
     def fake_interface(_proxy, interface_name):
@@ -757,9 +844,9 @@ def test_disconnect_wifi_network_raises_error_when_not_connected(
     properties = Mock()
     properties.Get.return_value = dbus.ObjectPath("/")
     monkeypatch.setattr(
-        nm_api,
+        nm_backend._NetworkManagerGateway,
         "_get_wifi_device_paths",
-        lambda _bus: [WIFI_DEVICE_PATH],
+        lambda _gateway: [WIFI_DEVICE_PATH],
     )
     monkeypatch.setattr(
         nm_api.dbus,
@@ -780,9 +867,9 @@ def test_disconnect_wifi_network_raises_dbus_exception(
     device = Mock()
     device.Disconnect.side_effect = dbus.exceptions.DBusException("Disconnect failed")
     monkeypatch.setattr(
-        nm_api,
+        nm_backend._NetworkManagerGateway,
         "_get_wifi_device_paths",
-        lambda _bus: [WIFI_DEVICE_PATH],
+        lambda _gateway: [WIFI_DEVICE_PATH],
     )
     monkeypatch.setattr(
         nm_api.dbus,

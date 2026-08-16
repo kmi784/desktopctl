@@ -9,6 +9,7 @@ description = "Desktop control backend for Wayland environments"
 requires-python = ">=3.13"
 dependencies = [
     "dbus-python>=1.4.0",
+    "PyGObject>=3.50.0",
 ]
 
 

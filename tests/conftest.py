@@ -16,13 +16,19 @@ def system_bus_factory(
         bus.proxy = object()
         bus.proxies = {}
         bus.get_object_calls = []
+        bus.system_bus_calls = []
 
         def _get_object(bus_name, object_path):
             bus.get_object_calls.append((bus_name, object_path))
             return bus.proxies.get(str(object_path), bus.proxy)
 
         bus.get_object.side_effect = _get_object
-        monkeypatch.setattr(api_module.dbus, "SystemBus", lambda: bus)
+
+        def _system_bus(*args, **kwargs):
+            bus.system_bus_calls.append((args, kwargs))
+            return bus
+
+        monkeypatch.setattr(api_module.dbus, "SystemBus", _system_bus)
         return bus
 
     return _create

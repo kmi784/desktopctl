@@ -3,8 +3,18 @@ from dataclasses import dataclass
 from time import sleep
 
 import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
 
 from desktopctl.misc import translate_dbus_errors
+
+from .bluez_agent import (
+    BLUEZ_AGENT_CAPABILITY,
+    BLUEZ_AGENT_MANAGER_INTERFACE,
+    BLUEZ_AGENT_MANAGER_PATH,
+    BLUEZ_AGENT_PATH,
+    BlueZAgent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +24,7 @@ ADAPTER_PATH = "/org/bluez/hci0"
 BLUEZ_ADAPTER_INTERFACE = "org.bluez.Adapter1"
 BLUEZ_DEVICE_INTERFACE = "org.bluez.Device1"
 DBUS_OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
+PAIRING_TIMEOUT = 60
 
 
 def _get_bluetooth_device_path(bus: dbus.SystemBus, address: str) -> str:
@@ -237,7 +248,7 @@ def scan_bluetooth_devices(duration: int = 10) -> None:
 
 @translate_dbus_errors(BluetoothError)
 def pair_bluetooth_device(address: str) -> None:
-    """Pair a Bluetooth device using the system agent.
+    """Pair and trust a Bluetooth device using a temporary BlueZ agent.
 
     Parameters
     ----------
@@ -246,11 +257,93 @@ def pair_bluetooth_device(address: str) -> None:
     """
     logger.debug("Pair Bluetooth device %s via D-Bus.", address)
 
-    bus = dbus.SystemBus()
-    device_path = _get_bluetooth_device_path(bus, address)
-    device_proxy = bus.get_object(BLUEZ_SERVICE, device_path)
-    device = dbus.Interface(device_proxy, BLUEZ_DEVICE_INTERFACE)
-    device.Pair()
+    dbus_main_loop = DBusGMainLoop()
+    bus = dbus.SystemBus(private=True, mainloop=dbus_main_loop)
+    agent = None
+    agent_manager = None
+    agent_registered = False
+
+    try:
+        device_path = _get_bluetooth_device_path(bus, address)
+        device_proxy = bus.get_object(BLUEZ_SERVICE, device_path)
+        device = dbus.Interface(device_proxy, BLUEZ_DEVICE_INTERFACE)
+        properties = dbus.Interface(device_proxy, dbus.PROPERTIES_IFACE)
+
+        paired = bool(properties.Get(BLUEZ_DEVICE_INTERFACE, "Paired"))
+        bonded = bool(properties.Get(BLUEZ_DEVICE_INTERFACE, "Bonded"))
+        if paired and bonded:
+            properties.Set(
+                BLUEZ_DEVICE_INTERFACE,
+                "Trusted",
+                dbus.Boolean(True),
+            )
+            return
+
+        agent = BlueZAgent(bus, device_path)
+        agent_manager_proxy = bus.get_object(
+            BLUEZ_SERVICE,
+            BLUEZ_AGENT_MANAGER_PATH,
+        )
+        agent_manager = dbus.Interface(
+            agent_manager_proxy,
+            BLUEZ_AGENT_MANAGER_INTERFACE,
+        )
+        agent_manager.RegisterAgent(BLUEZ_AGENT_PATH, BLUEZ_AGENT_CAPABILITY)
+        agent_registered = True
+
+        main_loop = GLib.MainLoop()
+        pairing_finished = False
+        pairing_error = None
+
+        def _finish_pairing() -> None:
+            nonlocal pairing_finished
+            pairing_finished = True
+            main_loop.quit()
+
+        def _fail_pairing(error: dbus.exceptions.DBusException) -> None:
+            nonlocal pairing_error, pairing_finished
+            pairing_error = error
+            pairing_finished = True
+            main_loop.quit()
+
+        device.Pair(
+            reply_handler=_finish_pairing,
+            error_handler=_fail_pairing,
+            timeout=PAIRING_TIMEOUT,
+        )
+
+        if not pairing_finished:
+            main_loop.run()
+
+        if pairing_error is not None:
+            raise pairing_error
+
+        paired = bool(properties.Get(BLUEZ_DEVICE_INTERFACE, "Paired"))
+        bonded = bool(properties.Get(BLUEZ_DEVICE_INTERFACE, "Bonded"))
+        if not paired or not bonded:
+            raise BluetoothError(
+                f"Bluetooth device {address!r} was not paired permanently."
+            )
+
+        properties.Set(
+            BLUEZ_DEVICE_INTERFACE,
+            "Trusted",
+            dbus.Boolean(True),
+        )
+    finally:
+        if agent_registered:
+            try:
+                agent_manager.UnregisterAgent(BLUEZ_AGENT_PATH)
+            except dbus.exceptions.DBusException:
+                logger.warning(
+                    "Failed to unregister the Bluetooth pairing agent.",
+                    exc_info=True,
+                )
+
+        if agent is not None:
+            agent.remove_from_connection()
+
+        bus.close()
 
 
 @translate_dbus_errors(BluetoothError)

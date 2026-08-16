@@ -283,15 +283,28 @@ def test_scan_bluetooth_devices_raises_dbus_exception(
     adapter.StopDiscovery.assert_not_called()
 
 
-def test_pair_bluetooth_device(monkeypatch, fake_system_bus):
+def _configure_pairing(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_system_bus,
+    *,
+    initially_paired: bool = False,
+    initially_bonded: bool = False,
+    paired: bool = True,
+    bonded: bool = True,
+    pairing_error: dbus.exceptions.DBusException | None = None,
+):
+    """Configure test doubles for the BlueZ pairing workflow."""
     bluez_proxy = object()
     device_proxy = object()
+    agent_manager_proxy = object()
     fake_system_bus.proxies.update(
         {
             BLUEZ_ROOT_PATH: bluez_proxy,
             BLUETOOTH_DEVICE_PATH: device_proxy,
+            bluez_api.BLUEZ_AGENT_MANAGER_PATH: agent_manager_proxy,
         }
     )
+
     object_manager = Mock()
     object_manager.GetManagedObjects.return_value = {
         BLUETOOTH_DEVICE_PATH: {
@@ -301,25 +314,136 @@ def test_pair_bluetooth_device(monkeypatch, fake_system_bus):
         }
     }
     device = Mock()
+    properties = Mock()
+    pairing_states = (
+        {"Paired": initially_paired, "Bonded": initially_bonded},
+        {"Paired": paired, "Bonded": bonded},
+    )
+    property_get_count = 0
+
+    def _get_property(_interface, name):
+        nonlocal property_get_count
+        state = pairing_states[min(property_get_count // 2, 1)]
+        property_get_count += 1
+        return dbus.Boolean(state[name])
+
+    properties.Get.side_effect = _get_property
+    agent_manager = Mock()
+    agent = Mock()
+    main_loop = Mock()
+    pairing_callbacks = {}
+
+    def _pair(**kwargs):
+        pairing_callbacks.update(kwargs)
+
+    def _run_main_loop():
+        if pairing_error is None:
+            pairing_callbacks["reply_handler"]()
+        else:
+            pairing_callbacks["error_handler"](pairing_error)
+
+    device.Pair.side_effect = _pair
+    main_loop.run.side_effect = _run_main_loop
 
     def fake_interface(proxy, interface_name):
         if proxy is bluez_proxy:
             assert interface_name == bluez_api.DBUS_OBJECT_MANAGER_INTERFACE
             return object_manager
 
-        assert proxy is device_proxy
-        assert interface_name == bluez_api.BLUEZ_DEVICE_INTERFACE
-        return device
+        if proxy is device_proxy:
+            if interface_name == bluez_api.BLUEZ_DEVICE_INTERFACE:
+                return device
+
+            assert interface_name == dbus.PROPERTIES_IFACE
+            return properties
+
+        assert proxy is agent_manager_proxy
+        assert interface_name == bluez_api.BLUEZ_AGENT_MANAGER_INTERFACE
+        return agent_manager
 
     monkeypatch.setattr(bluez_api.dbus, "Interface", fake_interface)
+    dbus_main_loop = Mock()
+    monkeypatch.setattr(
+        bluez_api,
+        "DBusGMainLoop",
+        Mock(return_value=dbus_main_loop),
+    )
+    monkeypatch.setattr(bluez_api, "BlueZAgent", Mock(return_value=agent))
+    monkeypatch.setattr(bluez_api.GLib, "MainLoop", Mock(return_value=main_loop))
+
+    return device, properties, agent_manager, agent, main_loop
+
+
+def test_pair_bluetooth_device(monkeypatch, fake_system_bus):
+    device, properties, agent_manager, agent, main_loop = _configure_pairing(
+        monkeypatch,
+        fake_system_bus,
+    )
 
     bluez_api.pair_bluetooth_device("aa:bb:cc:dd:ee:ff")
 
-    device.Pair.assert_called_once_with()
+    bluez_api.DBusGMainLoop.assert_called_once_with()
+    assert fake_system_bus.system_bus_calls == [
+        ((), {"private": True, "mainloop": bluez_api.DBusGMainLoop.return_value})
+    ]
     assert fake_system_bus.get_object_calls == [
         (bluez_api.BLUEZ_SERVICE, BLUEZ_ROOT_PATH),
         (bluez_api.BLUEZ_SERVICE, BLUETOOTH_DEVICE_PATH),
+        (bluez_api.BLUEZ_SERVICE, bluez_api.BLUEZ_AGENT_MANAGER_PATH),
     ]
+    bluez_api.BlueZAgent.assert_called_once_with(
+        fake_system_bus,
+        BLUETOOTH_DEVICE_PATH,
+    )
+    agent_manager.RegisterAgent.assert_called_once_with(
+        bluez_api.BLUEZ_AGENT_PATH,
+        bluez_api.BLUEZ_AGENT_CAPABILITY,
+    )
+    assert device.Pair.call_count == 1
+    assert device.Pair.call_args.kwargs["timeout"] == bluez_api.PAIRING_TIMEOUT
+    assert callable(device.Pair.call_args.kwargs["reply_handler"])
+    assert callable(device.Pair.call_args.kwargs["error_handler"])
+    main_loop.run.assert_called_once_with()
+    assert properties.Get.call_args_list == [
+        ((bluez_api.BLUEZ_DEVICE_INTERFACE, "Paired"),),
+        ((bluez_api.BLUEZ_DEVICE_INTERFACE, "Bonded"),),
+        ((bluez_api.BLUEZ_DEVICE_INTERFACE, "Paired"),),
+        ((bluez_api.BLUEZ_DEVICE_INTERFACE, "Bonded"),),
+    ]
+    interface_name, property_name, property_value = properties.Set.call_args.args
+    assert interface_name == bluez_api.BLUEZ_DEVICE_INTERFACE
+    assert property_name == "Trusted"
+    assert type(property_value) is dbus.Boolean
+    assert bool(property_value) is True
+    agent_manager.UnregisterAgent.assert_called_once_with(bluez_api.BLUEZ_AGENT_PATH)
+    agent.remove_from_connection.assert_called_once_with()
+    fake_system_bus.close.assert_called_once_with()
+
+
+def test_pair_bluetooth_device_trusts_existing_pairing(
+    monkeypatch,
+    fake_system_bus,
+):
+    device, properties, agent_manager, agent, main_loop = _configure_pairing(
+        monkeypatch,
+        fake_system_bus,
+        initially_paired=True,
+        initially_bonded=True,
+    )
+
+    bluez_api.pair_bluetooth_device("AA:BB:CC:DD:EE:FF")
+
+    device.Pair.assert_not_called()
+    bluez_api.BlueZAgent.assert_not_called()
+    agent_manager.RegisterAgent.assert_not_called()
+    main_loop.run.assert_not_called()
+    properties.Set.assert_called_once()
+    assert properties.Set.call_args.args[:2] == (
+        bluez_api.BLUEZ_DEVICE_INTERFACE,
+        "Trusted",
+    )
+    agent.remove_from_connection.assert_not_called()
+    fake_system_bus.close.assert_called_once_with()
 
 
 def test_pair_bluetooth_device_raises_error_when_not_discovered(
@@ -336,19 +460,52 @@ def test_pair_bluetooth_device_raises_error_when_not_discovered(
     with pytest.raises(bluez_api.BluetoothError, match="Scan for devices first"):
         bluez_api.pair_bluetooth_device("AA:BB:CC:DD:EE:FF")
 
+    fake_system_bus.close.assert_called_once_with()
+
 
 def test_pair_bluetooth_device_raises_dbus_exception(monkeypatch, fake_system_bus):
-    device = Mock()
-    device.Pair.side_effect = dbus.exceptions.DBusException("Pairing failed")
-    monkeypatch.setattr(
-        bluez_api,
-        "_get_bluetooth_device_path",
-        lambda _bus, _address: BLUETOOTH_DEVICE_PATH,
+    pairing_error = dbus.exceptions.DBusException("Pairing failed")
+    _device, properties, agent_manager, agent, _main_loop = _configure_pairing(
+        monkeypatch,
+        fake_system_bus,
+        pairing_error=pairing_error,
     )
-    monkeypatch.setattr(bluez_api.dbus, "Interface", Mock(return_value=device))
 
     with pytest.raises(bluez_api.BluetoothError, match="Pairing failed"):
         bluez_api.pair_bluetooth_device("AA:BB:CC:DD:EE:FF")
+
+    assert properties.Get.call_count == 2
+    properties.Set.assert_not_called()
+    agent_manager.UnregisterAgent.assert_called_once_with(bluez_api.BLUEZ_AGENT_PATH)
+    agent.remove_from_connection.assert_called_once_with()
+    fake_system_bus.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("paired", "bonded"),
+    [(False, True), (True, False)],
+    ids=["not-paired", "not-bonded"],
+)
+def test_pair_bluetooth_device_requires_persistent_pairing(
+    monkeypatch,
+    fake_system_bus,
+    paired,
+    bonded,
+):
+    _device, properties, agent_manager, agent, _main_loop = _configure_pairing(
+        monkeypatch,
+        fake_system_bus,
+        paired=paired,
+        bonded=bonded,
+    )
+
+    with pytest.raises(bluez_api.BluetoothError, match="not paired permanently"):
+        bluez_api.pair_bluetooth_device("AA:BB:CC:DD:EE:FF")
+
+    properties.Set.assert_not_called()
+    agent_manager.UnregisterAgent.assert_called_once_with(bluez_api.BLUEZ_AGENT_PATH)
+    agent.remove_from_connection.assert_called_once_with()
+    fake_system_bus.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize(

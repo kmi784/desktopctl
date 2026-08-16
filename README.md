@@ -1,77 +1,121 @@
 # `desktopctl`
 
-A lightweight command-line tool for controlling common Linux desktop functionality.
+A lightweight, UI-agnostic command-line backend for controlling common Linux
+desktop functionality.
+
+`desktopctl` provides a stable interface between replaceable frontends and Linux
+system services. It does not depend on Rofi, Quickshell, Waybar, Hyprland, or any
+other specific desktop configuration.
 
 ## Features
 
-- Provide machine-readable JSON output for listing commands using the `--json` option
+- Control WiFi through NetworkManager:
+  - show status, visible networks, and saved profiles;
+  - enable, disable, and scan;
+  - connect, disconnect, and forget profiles.
+- Control Bluetooth through BlueZ:
+  - show status, known devices, and paired devices;
+  - enable, disable, and scan;
+  - pair, connect, disconnect, and forget devices.
+- Provide stable machine-readable JSON for informational commands.
+- Communicate directly with NetworkManager and BlueZ over the system D-Bus.
 
-## Prerequisites
+Detailed command documentation is available in the
+[project wiki](https://github.com/kmi784/desktopctl/wiki).
+
+## Requirements
 
 - Python 3.13 or newer
-- NetworkManager command-line tool `nmcli`
-- BlueZ
-- D-Bus  
+- NetworkManager with a WiFi-capable device
+- BlueZ with a Bluetooth adapter
+- A running system D-Bus
+
+The Python package depends on `dbus-python` and PyGObject. Depending on the Linux
+distribution, installing these packages may require the corresponding system
+libraries and development headers.
 
 ## Installation
 
 ```sh
-git clone https://github.com/kmi784/desktopctl.git
-cd desktopctl
 mkdir -p ~/.local/share/desktopctl ~/.local/bin
 python3 -m venv ~/.local/share/desktopctl/venv
-~/.local/share/desktopctl/venv/bin/python -m pip install .
+~/.local/share/desktopctl/venv/bin/python -m pip install git+https://github.com/kmi784/desktopctl.git
 ln -s ~/.local/share/desktopctl/venv/bin/desktopctl ~/.local/bin/desktopctl
 ```
 
-## Usage
+Ensure `~/.local/bin` is included in `PATH`, then verify the installation:
 
 ```sh
 desktopctl --help
 ```
 
-For detailed usage instructions, see the [project wiki](https://github.com/kmi784/desktopctl/wiki).
+## Usage
+
+Inspect the available modules and commands through the built-in help:
+
+```sh
+desktopctl --help
+desktopctl wifi --help
+desktopctl bluetooth --help
+```
+
+Typical examples:
+
+```sh
+desktopctl wifi status --json
+desktopctl wifi scan
+desktopctl wifi visible
+
+desktopctl bluetooth status --json
+desktopctl bluetooth scan
+desktopctl bluetooth visible
+```
+
+Use the global `--debug` option before the module name to enable diagnostic
+logging:
+
+```sh
+desktopctl --debug wifi status
+```
 
 ## Development
+
+Create a local virtual environment and install the project with its development
+dependencies:
 
 ```sh
 git clone https://github.com/kmi784/desktopctl.git
 cd desktopctl
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## Tests
-
-Run the test suite:
+Run the test suite and static checks through the project environment:
 
 ```sh
-pytest
+.venv/bin/pytest
+.venv/bin/ruff check src tests
 ```
 
-## Formatting and linting
+## Exit codes
 
-### Linting
+`desktopctl` uses the following general exit codes:
 
-```sh
-ruff check . # use --fix if Ruff should fix the violations
-```
+- `0`: success
+- `1`: backend operation failed
+- `2`: invalid command or arguments
 
-### Formatting
+Backend errors are written to standard error.
 
-```sh
-ruff format .
-```
+## Roadmap
+
+- [x] WiFi control
+- [x] Bluetooth control
+- [ ] Audio control
+- [ ] Display brightness control
+- [ ] Power profile control
 
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
-## Roadmap
-
-- [x] Control WiFi functionality
-- [ ] Control Bluetooth functionality
-- [ ] Control audio functionality
-- [ ] Control display brightness
-- [ ] Control power profiles (Performance, Balanced, and Power Saver)

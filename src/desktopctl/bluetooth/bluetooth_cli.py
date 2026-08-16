@@ -5,10 +5,14 @@ from ..misc import print_table
 from .bluez_api import (
     BluetoothDevice,
     bluetooth_is_enabled,
+    connect_bluetooth_device,
+    disconnect_bluetooth_device,
     enable_bluetooth,
+    forget_bluetooth_device,
     list_connected_bluetooth_devices,
     list_paired_bluetooth_devices,
     list_visible_bluetooth_devices,
+    pair_bluetooth_device,
     scan_bluetooth_devices,
 )
 
@@ -91,21 +95,25 @@ def _scan(_arguments: argparse.Namespace) -> int:
 
 def _pair(arguments: argparse.Namespace) -> int:
     """Pair a Bluetooth device."""
+    pair_bluetooth_device(arguments.address)
     return 0
 
 
 def _connect(arguments: argparse.Namespace) -> int:
     """Connect a paired Bluetooth device."""
+    connect_bluetooth_device(arguments.address)
     return 0
 
 
 def _disconnect(arguments: argparse.Namespace) -> int:
     """Disconnect a connected Bluetooth device."""
+    disconnect_bluetooth_device(arguments.address)
     return 0
 
 
 def _forget(arguments: argparse.Namespace) -> int:
     """Forget a paired Bluetooth device."""
+    forget_bluetooth_device(arguments.address)
     return 0
 
 

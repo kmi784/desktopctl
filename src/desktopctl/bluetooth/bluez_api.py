@@ -4,7 +4,38 @@ from time import sleep
 
 import dbus
 
+from desktopctl.misc import translate_dbus_errors
+
 logger = logging.getLogger(__name__)
+
+
+BLUEZ_SERVICE = "org.bluez"
+ADAPTER_PATH = "/org/bluez/hci0"
+BLUEZ_ADAPTER_INTERFACE = "org.bluez.Adapter1"
+BLUEZ_DEVICE_INTERFACE = "org.bluez.Device1"
+DBUS_OBJECT_MANAGER_INTERFACE = "org.freedesktop.DBus.ObjectManager"
+
+
+def _get_bluetooth_device_path(bus: dbus.SystemBus, address: str) -> str:
+    """Return the object path of a discovered Bluetooth device."""
+    bluez_proxy = bus.get_object(BLUEZ_SERVICE, "/")
+    object_manager = dbus.Interface(
+        bluez_proxy,
+        DBUS_OBJECT_MANAGER_INTERFACE,
+    )
+
+    for device_path, interfaces in object_manager.GetManagedObjects().items():
+        properties = interfaces.get(BLUEZ_DEVICE_INTERFACE)
+
+        if properties is None:
+            continue
+
+        if str(properties["Address"]).casefold() == address.casefold():
+            return str(device_path)
+
+    raise BluetoothError(
+        f"Bluetooth device {address!r} was not found. Scan for devices first."
+    )
 
 
 # public API ---------------------------------------------------------------------------
@@ -45,6 +76,7 @@ class BluetoothDevice:
 # listings
 
 
+@translate_dbus_errors(BluetoothError)
 def bluetooth_is_enabled() -> bool:
     """Return whether Bluetooth is enabled.
 
@@ -55,24 +87,21 @@ def bluetooth_is_enabled() -> bool:
     """
     logger.debug("Query Bluetooth adapter power state via D-Bus.")
 
-    try:
-        bus = dbus.SystemBus()
+    bus = dbus.SystemBus()
 
-        # Proxy object representing the Bluetooth adapter managed by BlueZ.
-        adapter_proxy = bus.get_object("org.bluez", "/org/bluez/hci0")
+    # Proxy object representing the Bluetooth adapter managed by BlueZ.
+    adapter_proxy = bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH)
 
-        # Proxy for the standard D-Bus properties interface.
-        properties = dbus.Interface(adapter_proxy, dbus.PROPERTIES_IFACE)
+    # Proxy for the standard D-Bus properties interface.
+    properties = dbus.Interface(adapter_proxy, dbus.PROPERTIES_IFACE)
 
-        # Power-state property of the Bluetooth adapter.
-        powered = properties.Get("org.bluez.Adapter1", "Powered")
-
-    except dbus.exceptions.DBusException as error:
-        raise BluetoothError(str(error)) from error
+    # Power-state property of the Bluetooth adapter.
+    powered = properties.Get(BLUEZ_ADAPTER_INTERFACE, "Powered")
 
     return bool(powered)
 
 
+@translate_dbus_errors(BluetoothError)
 def list_visible_bluetooth_devices() -> list[BluetoothDevice]:
     """List all visible Bluetooth devices.
 
@@ -83,23 +112,18 @@ def list_visible_bluetooth_devices() -> list[BluetoothDevice]:
     """
     logger.debug("Query visible Bluetooth devices via D-Bus.")
 
-    try:
-        bus = dbus.SystemBus()
+    bus = dbus.SystemBus()
 
-        # Proxy object representing the root of the BlueZ object tree.
-        bluez_proxy = bus.get_object("org.bluez", "/")
+    # Proxy object representing the root of the BlueZ object tree.
+    bluez_proxy = bus.get_object(BLUEZ_SERVICE, "/")
 
-        object_manager = dbus.Interface(
-            bluez_proxy, "org.freedesktop.DBus.ObjectManager"
-        )
+    object_manager = dbus.Interface(bluez_proxy, DBUS_OBJECT_MANAGER_INTERFACE)
 
-        managed_objects = object_manager.GetManagedObjects()
-    except dbus.exceptions.DBusException as error:
-        raise BluetoothError(str(error)) from error
+    managed_objects = object_manager.GetManagedObjects()
 
     devices = []
     for interfaces in managed_objects.values():
-        device_properties = interfaces.get("org.bluez.Device1")
+        device_properties = interfaces.get(BLUEZ_DEVICE_INTERFACE)
 
         if device_properties is None:
             continue
@@ -136,7 +160,9 @@ def list_connected_bluetooth_devices() -> list[BluetoothDevice]:
     `list[BluetoothDevice]`
         Connected Bluetooth devices reported by BlueZ.
     """
-    logger.debug("Query connected Bluetooth devices via D-Bus.")
+    logger.debug(
+        "Call list_visible_bluetooth_devices to query connected Bluetooth devices."
+    )
 
     devices = []
     for device in list_visible_bluetooth_devices():
@@ -151,10 +177,12 @@ def list_paired_bluetooth_devices() -> list[BluetoothDevice]:
 
     Returns
     -------
-    `list[BluetoothDevice | None]`
+    `list[BluetoothDevice]`
         Paired Bluetooth devices reported by BlueZ.
     """
-    logger.debug("Query paired Bluetooth devices via D-Bus.")
+    logger.debug(
+        "Call list_visible_bluetooth_devices to query paired Bluetooth devices."
+    )
 
     devices = []
     for device in list_visible_bluetooth_devices():
@@ -167,6 +195,7 @@ def list_paired_bluetooth_devices() -> list[BluetoothDevice]:
 # control
 
 
+@translate_dbus_errors(BluetoothError)
 def enable_bluetooth(enable: bool) -> None:
     """Enable or disable Bluetooth.
 
@@ -177,17 +206,14 @@ def enable_bluetooth(enable: bool) -> None:
     """
     logger.debug("Set Bluetooth adapter power state via D-Bus.")
 
-    try:
-        bus = dbus.SystemBus()
-        adapter_proxy = bus.get_object("org.bluez", "/org/bluez/hci0")
-        properties = dbus.Interface(adapter_proxy, dbus.PROPERTIES_IFACE)
+    bus = dbus.SystemBus()
+    adapter_proxy = bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH)
+    properties = dbus.Interface(adapter_proxy, dbus.PROPERTIES_IFACE)
 
-        properties.Set("org.bluez.Adapter1", "Powered", dbus.Boolean(enable))
-
-    except dbus.exceptions.DBusException as error:
-        raise BluetoothError(str(error)) from error
+    properties.Set(BLUEZ_ADAPTER_INTERFACE, "Powered", dbus.Boolean(enable))
 
 
+@translate_dbus_errors(BluetoothError)
 def scan_bluetooth_devices(duration: int = 10) -> None:
     """Scan for nearby Bluetooth devices.
 
@@ -198,16 +224,84 @@ def scan_bluetooth_devices(duration: int = 10) -> None:
     """
     logger.debug("Scan for Bluetooth devices via D-Bus.")
 
+    bus = dbus.SystemBus()
+    adapter_proxy = bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH)
+    adapter = dbus.Interface(adapter_proxy, BLUEZ_ADAPTER_INTERFACE)
+    adapter.StartDiscovery()
+
     try:
-        bus = dbus.SystemBus()
-        adapter_proxy = bus.get_object("org.bluez", "/org/bluez/hci0")
-        adapter = dbus.Interface(adapter_proxy, "org.bluez.Adapter1")
-        adapter.StartDiscovery()
+        sleep(duration)
+    finally:
+        adapter.StopDiscovery()
 
-        try:
-            sleep(duration)
-        finally:
-            adapter.StopDiscovery()
 
-    except dbus.exceptions.DBusException as error:
-        raise BluetoothError(str(error)) from error
+@translate_dbus_errors(BluetoothError)
+def pair_bluetooth_device(address: str) -> None:
+    """Pair a Bluetooth device using the system agent.
+
+    Parameters
+    ----------
+    `address` : `str`
+        Address of a Bluetooth device discovered by BlueZ.
+    """
+    logger.debug("Pair Bluetooth device %s via D-Bus.", address)
+
+    bus = dbus.SystemBus()
+    device_path = _get_bluetooth_device_path(bus, address)
+    device_proxy = bus.get_object(BLUEZ_SERVICE, device_path)
+    device = dbus.Interface(device_proxy, BLUEZ_DEVICE_INTERFACE)
+    device.Pair()
+
+
+@translate_dbus_errors(BluetoothError)
+def connect_bluetooth_device(address: str) -> None:
+    """Connect a paired Bluetooth device.
+
+    Parameters
+    ----------
+    `address` : `str`
+        Address of a Bluetooth device known to BlueZ.
+    """
+    logger.debug("Connect Bluetooth device %s via D-Bus.", address)
+
+    bus = dbus.SystemBus()
+    device_path = _get_bluetooth_device_path(bus, address)
+    device_proxy = bus.get_object(BLUEZ_SERVICE, device_path)
+    device = dbus.Interface(device_proxy, BLUEZ_DEVICE_INTERFACE)
+    device.Connect()
+
+
+@translate_dbus_errors(BluetoothError)
+def disconnect_bluetooth_device(address: str) -> None:
+    """Disconnect a Bluetooth device.
+
+    Parameters
+    ----------
+    `address` : `str`
+        Address of a Bluetooth device known to BlueZ.
+    """
+    logger.debug("Disconnect Bluetooth device %s via D-Bus.", address)
+
+    bus = dbus.SystemBus()
+    device_path = _get_bluetooth_device_path(bus, address)
+    device_proxy = bus.get_object(BLUEZ_SERVICE, device_path)
+    device = dbus.Interface(device_proxy, BLUEZ_DEVICE_INTERFACE)
+    device.Disconnect()
+
+
+@translate_dbus_errors(BluetoothError)
+def forget_bluetooth_device(address: str) -> None:
+    """Forget a paired Bluetooth device.
+
+    Parameters
+    ----------
+    `address` : `str`
+        Address of a Bluetooth device known to BlueZ.
+    """
+    logger.debug("Forget Bluetooth device %s via D-Bus.", address)
+
+    bus = dbus.SystemBus()
+    device_path = _get_bluetooth_device_path(bus, address)
+    adapter_proxy = bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH)
+    adapter = dbus.Interface(adapter_proxy, BLUEZ_ADAPTER_INTERFACE)
+    adapter.RemoveDevice(device_path)

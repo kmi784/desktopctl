@@ -4,7 +4,7 @@ from io import StringIO
 
 import pytest
 
-from desktopctl.wifi import nmcli_api, wifi_cli
+from desktopctl.wifi import nm_api, wifi_cli
 
 
 @pytest.mark.parametrize(
@@ -14,7 +14,7 @@ from desktopctl.wifi import nmcli_api, wifi_cli
 )
 def test_status(monkeypatch: pytest.MonkeyPatch, capsys, enabled, expected_output):
     monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: enabled)
-    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: None)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi_network", lambda: None)
 
     result = wifi_cli._status(argparse.Namespace(json=False))
 
@@ -23,9 +23,9 @@ def test_status(monkeypatch: pytest.MonkeyPatch, capsys, enabled, expected_outpu
 
 
 def test_status_json_connected(monkeypatch: pytest.MonkeyPatch, capsys):
-    network = nmcli_api.WifiNetwork("WiFi", 67, "WPA2", True)
+    network = nm_api.WifiNetwork("WiFi", 67, "password", True)
     monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: True)
-    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: network)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi_network", lambda: network)
 
     result = wifi_cli._status(argparse.Namespace(json=True))
     output = json.loads(capsys.readouterr().out)
@@ -36,14 +36,14 @@ def test_status_json_connected(monkeypatch: pytest.MonkeyPatch, capsys):
         "connected": True,
         "ssid": "WiFi",
         "signal": 67,
-        "security": "WPA2",
+        "authentication": "password",
     }
 
 
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 def test_status_json_disconnected(monkeypatch: pytest.MonkeyPatch, capsys, enabled):
     monkeypatch.setattr(wifi_cli, "wifi_is_enabled", lambda: enabled)
-    monkeypatch.setattr(wifi_cli, "show_connected_wifi", lambda: None)
+    monkeypatch.setattr(wifi_cli, "show_connected_wifi_network", lambda: None)
 
     result = wifi_cli._status(argparse.Namespace(json=True))
     output = json.loads(capsys.readouterr().out)
@@ -54,14 +54,14 @@ def test_status_json_disconnected(monkeypatch: pytest.MonkeyPatch, capsys, enabl
         "connected": False,
         "ssid": None,
         "signal": None,
-        "security": None,
+        "authentication": None,
     }
 
 
 def test_list_visible(monkeypatch: pytest.MonkeyPatch, capsys):
     networks = [
-        nmcli_api.WifiNetwork("Dummy WiFi", 67, "WPA2", False),
-        nmcli_api.WifiNetwork("WiFi", 8, "--", True),
+        nm_api.WifiNetwork("Dummy WiFi", 67, "password", False),
+        nm_api.WifiNetwork("WiFi", 8, "open", True),
     ]
     monkeypatch.setattr(wifi_cli, "list_visible_wifi_networks", lambda: networks)
 
@@ -69,16 +69,16 @@ def test_list_visible(monkeypatch: pytest.MonkeyPatch, capsys):
 
     assert result == 0
     assert capsys.readouterr().out == (
-        "SSID        SIGNAL  SECURITY  CONNECTED\n"
-        "Dummy WiFi  67      WPA2      false\n"
-        "WiFi        8       --        true\n"
+        "SSID        SIGNAL  AUTHENTICATION  CONNECTED\n"
+        "Dummy WiFi  67      password        false\n"
+        "WiFi        8       open            true\n"
     )
 
 
 def test_list_visible_json(monkeypatch: pytest.MonkeyPatch, capsys):
     networks = [
-        nmcli_api.WifiNetwork("Dummy WiFi", 67, "WPA2", False),
-        nmcli_api.WifiNetwork("WiFi", 8, "--", True),
+        nm_api.WifiNetwork("Dummy WiFi", 67, "password", False),
+        nm_api.WifiNetwork("WiFi", 8, "open", True),
     ]
     monkeypatch.setattr(wifi_cli, "list_visible_wifi_networks", lambda: networks)
 
@@ -90,17 +90,22 @@ def test_list_visible_json(monkeypatch: pytest.MonkeyPatch, capsys):
         {
             "ssid": "Dummy WiFi",
             "signal": 67,
-            "security": "WPA2",
+            "authentication": "password",
             "connected": False,
         },
-        {"ssid": "WiFi", "signal": 8, "security": "--", "connected": True},
+        {
+            "ssid": "WiFi",
+            "signal": 8,
+            "authentication": "open",
+            "connected": True,
+        },
     ]
 
 
 def test_list_saved(monkeypatch: pytest.MonkeyPatch, capsys):
     profiles = [
-        nmcli_api.SavedWifiProfile("123abc", "Dummy", "Dummy WiFi"),
-        nmcli_api.SavedWifiProfile("456def", "Work profile", "Work"),
+        nm_api.SavedWifiProfile("123abc", "Dummy", "Dummy WiFi"),
+        nm_api.SavedWifiProfile("456def", "Work profile", "Work"),
     ]
     monkeypatch.setattr(wifi_cli, "list_saved_wifi_networks", lambda: profiles)
 
@@ -116,8 +121,8 @@ def test_list_saved(monkeypatch: pytest.MonkeyPatch, capsys):
 
 def test_list_saved_json(monkeypatch: pytest.MonkeyPatch, capsys):
     profiles = [
-        nmcli_api.SavedWifiProfile("123abc", "Dummy", "Dummy WiFi"),
-        nmcli_api.SavedWifiProfile("456def", "Work profile", "Work"),
+        nm_api.SavedWifiProfile("123abc", "Dummy", "Dummy WiFi"),
+        nm_api.SavedWifiProfile("456def", "Work profile", "Work"),
     ]
     monkeypatch.setattr(wifi_cli, "list_saved_wifi_networks", lambda: profiles)
 

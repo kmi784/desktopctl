@@ -2,7 +2,8 @@ import argparse
 import json
 import sys
 
-from .nmcli_api import (
+from ..misc import print_table
+from .nm_api import (
     WifiError,
     connect_wifi_network,
     disconnect_wifi_network,
@@ -11,39 +12,9 @@ from .nmcli_api import (
     list_saved_wifi_networks,
     list_visible_wifi_networks,
     scan_wifi_networks,
-    show_connected_wifi,
+    show_connected_wifi_network,
     wifi_is_enabled,
 )
-
-
-def _print_table(data: list[dict]) -> None:
-    """Print dictionary records as a table."""
-    if not data:
-        return
-
-    columns = list(data[0])
-    rows = [
-        {
-            key: str(value).lower() if isinstance(value, bool) else str(value)
-            for key, value in row.items()
-        }
-        for row in data
-    ]
-    widths = {
-        column: max(len(column), *(len(row[column]) for row in rows))
-        for column in columns
-    }
-
-    def _print_row(row: dict[str, str]) -> None:
-        print(
-            "  ".join(f"{row[column]:<{widths[column]}}" for column in columns).rstrip()
-        )
-
-    _print_row({column: column.upper() for column in columns})
-
-    for row in rows:
-        _print_row(row)
-
 
 # listings
 
@@ -51,7 +22,7 @@ def _print_table(data: list[dict]) -> None:
 def _status(arguments: argparse.Namespace) -> int:
     """Print the WiFi status in the requested format."""
     enabled = wifi_is_enabled()
-    network = show_connected_wifi() if enabled else None
+    network = show_connected_wifi_network() if enabled else None
 
     if arguments.json:
         data = {
@@ -59,7 +30,7 @@ def _status(arguments: argparse.Namespace) -> int:
             "connected": network is not None,
             "ssid": network.ssid if network else None,
             "signal": network.signal if network else None,
-            "security": network.security if network else None,
+            "authentication": network.authentication if network else None,
         }
         print(json.dumps(data))
     else:
@@ -74,7 +45,7 @@ def _list_visible(arguments: argparse.Namespace) -> int:
         {
             "ssid": network.ssid,
             "signal": network.signal,
-            "security": network.security,
+            "authentication": network.authentication,
             "connected": network.connected,
         }
         for network in list_visible_wifi_networks()
@@ -83,7 +54,7 @@ def _list_visible(arguments: argparse.Namespace) -> int:
     if arguments.json:
         print(json.dumps(data))
     else:
-        _print_table(data)
+        print_table(data)
     return 0
 
 
@@ -101,7 +72,7 @@ def _list_saved(arguments: argparse.Namespace) -> int:
     if arguments.json:
         print(json.dumps(data))
     else:
-        _print_table(data)
+        print_table(data)
 
     return 0
 

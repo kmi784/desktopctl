@@ -17,8 +17,11 @@ other specific desktop configuration.
   - show status, known devices, and paired devices;
   - enable, disable, and scan;
   - pair, connect, disconnect, and forget devices.
+- Inspect power state through UPower and control system power profiles:
+  - show battery, charging, external-power, and active-profile status;
+  - select `power-saver`, `balanced`, or `performance`.
 - Provide stable machine-readable JSON for informational commands.
-- Communicate directly with NetworkManager and BlueZ over the system D-Bus.
+- Communicate directly with Linux services over the system D-Bus.
 
 Detailed command documentation is available in the
 [project wiki](https://github.com/kmi784/desktopctl/wiki).
@@ -28,6 +31,8 @@ Detailed command documentation is available in the
 - Python 3.13 or newer
 - NetworkManager with a WiFi-capable device
 - BlueZ with a Bluetooth adapter
+- UPower
+- A Power Profiles service compatible with `org.freedesktop.UPower.PowerProfiles`
 - A running system D-Bus
 
 The Python package depends on `dbus-python` and PyGObject. Depending on the Linux
@@ -57,6 +62,7 @@ Inspect the available modules and commands through the built-in help:
 desktopctl --help
 desktopctl wifi --help
 desktopctl bluetooth --help
+desktopctl power --help
 ```
 
 Typical examples:
@@ -69,6 +75,9 @@ desktopctl wifi visible
 desktopctl bluetooth status --json
 desktopctl bluetooth scan
 desktopctl bluetooth visible
+
+desktopctl power status --json
+desktopctl power profile balanced
 ```
 
 Use the global `--debug` option before the module name to enable diagnostic
@@ -112,9 +121,9 @@ Backend errors are written to standard error.
 
 - [x] WiFi control
 - [x] Bluetooth control
+- [x] Power status and profile control
 - [ ] Audio control
 - [ ] Display brightness control
-- [ ] Power profile control
 
 ## License
 

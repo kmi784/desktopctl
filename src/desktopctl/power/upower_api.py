@@ -90,6 +90,7 @@ def get_battery_status() -> BatteryStatus:
     `BatteryStatus`
         Current battery percentage and charging state.
     """
+    logger.debug("Query UPower for battery status via D-Bus.")
     values = _display_device_properties()
     if not bool(values["IsPresent"]):
         return BatteryStatus(None, None)
@@ -109,6 +110,7 @@ def device_is_ac_connected() -> bool:
     `bool`
         `True` if the system is not running on battery; otherwise, `False`.
     """
+    logger.debug("Query UPower for external power state via D-Bus.")
     bus = dbus.SystemBus()
     upower_proxy = bus.get_object(UPOWER_SERVICE, UPOWER_PATH)
     properties = dbus.Interface(upower_proxy, dbus.PROPERTIES_IFACE)
@@ -130,6 +132,7 @@ def get_power_profile() -> PowerProfile:
     `PowerError`
         If the active profile reported by the service is unsupported.
     """
+    logger.debug("Query the active power profile via D-Bus.")
     properties = _power_profile_properties_interface()
     value = properties.Get(POWER_PROFILE_SERVICE, "ActiveProfile")
 
@@ -148,5 +151,6 @@ def set_power_profile(profile: PowerProfile) -> None:
     `profile` : `PowerProfile`
         Power profile to activate.
     """
+    logger.debug("Set the active power profile to %s via D-Bus.", profile.value)
     properties = _power_profile_properties_interface()
     properties.Set(POWER_PROFILE_SERVICE, "ActiveProfile", dbus.String(profile.value))

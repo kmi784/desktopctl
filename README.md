@@ -20,8 +20,14 @@ other specific desktop configuration.
 - Inspect power state through UPower and control system power profiles:
   - show battery, charging, external-power, and active-profile status;
   - select `power-saver`, `balanced`, or `performance`.
+- Control display brightness through the Linux backlight interface and
+  systemd-logind:
+  - show the current brightness as a percentage;
+  - set an absolute brightness percentage;
+  - increase or decrease brightness by percentage points.
 - Provide stable machine-readable JSON for informational commands.
-- Communicate directly with Linux services over the system D-Bus.
+- Communicate directly with Linux services over the system D-Bus and with
+  kernel interfaces such as sysfs.
 
 Detailed command documentation is available in the
 [project wiki](https://github.com/kmi784/desktopctl/wiki).
@@ -33,6 +39,8 @@ Detailed command documentation is available in the
 - BlueZ with a Bluetooth adapter
 - UPower
 - A Power Profiles service compatible with `org.freedesktop.UPower.PowerProfiles`
+- systemd-logind
+- A display backlight exposed through `/sys/class/backlight`
 - A running system D-Bus
 
 The Python package depends on `dbus-python` and PyGObject. Depending on the Linux
@@ -63,6 +71,7 @@ desktopctl --help
 desktopctl wifi --help
 desktopctl bluetooth --help
 desktopctl power --help
+desktopctl brightness --help
 ```
 
 Typical examples:
@@ -78,6 +87,10 @@ desktopctl bluetooth visible
 
 desktopctl power status --json
 desktopctl power profile balanced
+
+desktopctl brightness get --json
+desktopctl brightness set 50
+desktopctl brightness change -10
 ```
 
 Use the global `--debug` option before the module name to enable diagnostic
@@ -122,8 +135,8 @@ Backend errors are written to standard error.
 - [x] WiFi control
 - [x] Bluetooth control
 - [x] Power status and profile control
+- [x] Display brightness control
 - [ ] Audio control
-- [ ] Display brightness control
 
 ## License
 

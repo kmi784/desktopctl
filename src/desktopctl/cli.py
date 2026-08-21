@@ -9,12 +9,20 @@ from .wifi import WifiError, configure_wifi_parser
 
 logger = logging.getLogger(__name__)
 
+DESCRIPTION = (
+    "Control common Linux desktop functionality.\n\n"
+    "For more details see:\n"
+    "https://github.com/kmi784/desktopctl/wiki"
+)
+
 
 def main() -> int:
     """Run the `desktopctl` CLI."""
 
     parser = argparse.ArgumentParser(
-        prog="desktopctl", description="Control common Linux desktop functionality."
+        prog="desktopctl",
+        description=DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # Configure global options.
